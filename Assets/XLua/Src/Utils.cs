@@ -47,7 +47,7 @@ namespace XLua
 		public static RealStatePtr GetMainState(RealStatePtr L)
 		{
 			RealStatePtr ret = default(RealStatePtr);
-			LuaAPI.xlua_pushasciistring(L, "xlua_main_thread");
+			LuaAPI.xlua_pushasciistring(L, LuaEnv.MAIN_SHREAD);
 			LuaAPI.lua_rawget(L, LuaIndexes.LUA_REGISTRYINDEX);
 			if (LuaAPI.lua_isthread(L, -1))
 			{
@@ -113,14 +113,14 @@ namespace XLua
 			{
 				try
 				{
-#if UNITY_EDITOR || XLUA_GENERAL
+#if (UNITY_EDITOR || XLUA_GENERAL) && !NET_STANDARD_2_0
 					if (!(assemblies[i].ManifestModule is System.Reflection.Emit.ModuleBuilder))
 					{
 #endif
 						allTypes.AddRange(assemblies[i].GetTypes()
 						.Where(type => exclude_generic_definition ? !type.IsGenericTypeDefinition() : true)
 						);
-#if UNITY_EDITOR || XLUA_GENERAL
+#if (UNITY_EDITOR || XLUA_GENERAL) && !NET_STANDARD_2_0
 					}
 #endif
 				}
@@ -195,7 +195,7 @@ namespace XLua
 						return LuaAPI.luaL_error(L, type.Name + "." + field.Name + " Expected type " + field.FieldType);
 					}
 					field.SetValue(obj, val);
-					if (type.IsValueType)
+					if (type.IsValueType())
 					{
 						translator.Update(L, 1, obj);
 					}
@@ -407,7 +407,9 @@ namespace XLua
 			FieldInfo[] fields = type.GetFields(flag);
 			EventInfo[] all_events = type.GetEvents(flag | BindingFlags.Public | BindingFlags.NonPublic);
 
-			for (int i = 0; i < fields.Length; ++i)
+            LuaAPI.lua_checkstack(L, 2);
+
+            for (int i = 0; i < fields.Length; ++i)
 			{
 				FieldInfo field = fields[i];
 				string fieldName = field.Name;
@@ -604,7 +606,9 @@ namespace XLua
 
 		public static void MakePrivateAccessible(RealStatePtr L, Type type)
 		{
-			int oldTop = LuaAPI.lua_gettop(L);
+            LuaAPI.lua_checkstack(L, 20);
+
+            int oldTop = LuaAPI.lua_gettop(L);
 
 			LuaAPI.luaL_getmetatable(L, type.FullName);
 			if (LuaAPI.lua_isnil(L, -1))
@@ -808,7 +812,9 @@ namespace XLua
 
 		public static void ReflectionWrap(RealStatePtr L, Type type, bool privateAccessible)
 		{
-			int top_enter = LuaAPI.lua_gettop(L);
+            LuaAPI.lua_checkstack(L, 20);
+
+            int top_enter = LuaAPI.lua_gettop(L);
 			ObjectTranslator translator = ObjectTranslatorPool.Instance.Find(L);
 			//create obj meta table
 			LuaAPI.luaL_getmetatable(L, type.FullName);
@@ -833,12 +839,15 @@ namespace XLua
 			int obj_setter = LuaAPI.lua_gettop(L);
 			LuaAPI.lua_newtable(L);
 			int cls_field = LuaAPI.lua_gettop(L);
-			LuaAPI.lua_newtable(L);
+            //set cls_field to namespace
+            SetCSTable(L, type, cls_field);
+            //finish set cls_field to namespace
+            LuaAPI.lua_newtable(L);
 			int cls_getter = LuaAPI.lua_gettop(L);
 			LuaAPI.lua_newtable(L);
 			int cls_setter = LuaAPI.lua_gettop(L);
 
-			LuaCSFunction item_getter;
+            LuaCSFunction item_getter;
 			LuaCSFunction item_setter;
 			makeReflectionWrap(L, type, cls_field, cls_getter, cls_setter, obj_field, obj_getter, obj_setter, obj_meta,
 				out item_getter, out item_setter, privateAccessible ? (BindingFlags.Public | BindingFlags.NonPublic) : BindingFlags.Public);
@@ -898,10 +907,6 @@ namespace XLua
 				translator.PushFixCSFunction(L, genEnumCastFrom(type));
 				LuaAPI.lua_rawset(L, cls_field);
 			}
-
-			//set cls_field to namespace
-			SetCSTable(L, type, cls_field);
-			//finish set cls_field to namespace
 
 			//init class meta
 			LuaAPI.xlua_pushasciistring(L, "__index");
@@ -1315,12 +1320,10 @@ namespace XLua
 		public static void LoadCSTable(RealStatePtr L, Type type)
 		{
 			int oldTop = LuaAPI.lua_gettop(L);
-			if (0 != LuaAPI.xlua_getglobal(L, "CS"))
-			{
-				throw new Exception("call xlua_getglobal fail!");
-			}
+            LuaAPI.xlua_pushasciistring(L, LuaEnv.CSHARP_NAMESPACE);
+            LuaAPI.lua_rawget(L, LuaIndexes.LUA_REGISTRYINDEX);
 
-			List<string> path = getPathOfType(type);
+            List<string> path = getPathOfType(type);
 
 			for (int i = 0; i < path.Count; ++i)
 			{
@@ -1345,12 +1348,10 @@ namespace XLua
 		{
 			int oldTop = LuaAPI.lua_gettop(L);
 			cls_table = abs_idx(oldTop, cls_table);
-			if (0 != LuaAPI.xlua_getglobal(L, "CS"))
-			{
-				throw new Exception("call xlua_getglobal fail!");
-			}
+            LuaAPI.xlua_pushasciistring(L, LuaEnv.CSHARP_NAMESPACE);
+            LuaAPI.lua_rawget(L, LuaIndexes.LUA_REGISTRYINDEX);
 
-			List<string> path = getPathOfType(type);
+            List<string> path = getPathOfType(type);
 
 			for (int i = 0; i < path.Count - 1; ++i)
 			{
@@ -1381,8 +1382,9 @@ namespace XLua
 			LuaAPI.lua_rawset(L, -3);
 			LuaAPI.lua_pop(L, 1);
 
-			LuaAPI.xlua_getglobal(L, "CS");
-			ObjectTranslatorPool.Instance.Find(L).PushAny(L, type);
+            LuaAPI.xlua_pushasciistring(L, LuaEnv.CSHARP_NAMESPACE);
+            LuaAPI.lua_rawget(L, LuaIndexes.LUA_REGISTRYINDEX);
+            ObjectTranslatorPool.Instance.Find(L).PushAny(L, type);
 			LuaAPI.lua_pushvalue(L, cls_table);
 			LuaAPI.lua_rawset(L, -3);
 			LuaAPI.lua_pop(L, 1);
@@ -1421,7 +1423,8 @@ namespace XLua
 				}
 			}
 
-			return true;
+            var lastPos = delegateParams.Length - 1;
+            return lastPos < 0 || delegateParams[lastPos].IsDefined(typeof(ParamArrayAttribute), false) == bridgeParams[lastPos].IsDefined(typeof(ParamArrayAttribute), false);
 		}
 
 		public static bool IsSupportedMethod(MethodInfo method)

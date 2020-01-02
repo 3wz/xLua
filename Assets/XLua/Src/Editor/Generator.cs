@@ -387,12 +387,66 @@ namespace CSObjectWrapEditor
                 .Where(method => method.GetParameters().Length == 2 && !method.GetParameters()[0].ParameterType.IsAssignableFrom(typeof(string)))
                 .ToList());
 
-            parameters.Set("events", type.GetEvents(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.IgnoreCase | BindingFlags.DeclaredOnly).Where(e => !isObsolete(e) && !isMemberInBlackList(e))
-                .Where(ev=> ev.GetAddMethod() != null || ev.GetRemoveMethod() != null)
-                .Where(ev => !IsDoNotGen(type, ev.Name))
-                .Select(ev => new { IsStatic = ev.GetAddMethod() != null? ev.GetAddMethod().IsStatic: ev.GetRemoveMethod().IsStatic, ev.Name,
-                    CanSet = false, CanAdd = ev.GetRemoveMethod() != null, CanRemove = ev.GetRemoveMethod() != null, Type = ev.EventHandlerType})
-                .ToList());
+            parameters.Set("events", type.GetMembers(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.IgnoreCase | BindingFlags.DeclaredOnly)
+                .Where(e => !isObsolete(e) && !isMemberInBlackList(e) && !IsDoNotGen(type, e.Name))
+                .Where(m =>
+                {
+                    Type tempType = typeof(Nullable);
+                    switch (m.MemberType)
+                    {
+                        case MemberTypes.Field:
+                            var fi = m as FieldInfo;
+                            tempType = fi.FieldType;
+                            break;
+                        case MemberTypes.Property:
+                            var pi = m as PropertyInfo;
+                            tempType = pi.PropertyType;
+                            break;
+                        case MemberTypes.Event:
+                            var ei = m as EventInfo;
+                            return ei.GetAddMethod() != null || ei.GetRemoveMethod() != null;
+                    }
+                    return tempType.IsSubclassOf(typeof(Delegate));
+                })
+                .Select(m =>
+                {
+                    switch (m.MemberType)
+                    {
+                        case MemberTypes.Field:
+                            var fi = m as FieldInfo;
+                            return new
+                            {
+                                IsStatic = fi.IsStatic,
+                                Name = fi.Name,
+                                CanSet = false,
+                                CanAdd = true,
+                                CanRemove = true,
+                                Type = fi.FieldType
+                            };
+                        case MemberTypes.Property:
+                            var pi = m as PropertyInfo;
+                            return new
+                            {
+                                IsStatic = pi.GetAccessors()[0].IsStatic,
+                                Name = pi.Name,
+                                CanSet = false,
+                                CanAdd = pi.GetSetMethod() != null,
+                                CanRemove = pi.GetSetMethod() != null,
+                                Type = pi.PropertyType
+                            };
+                        default:
+                            var ei = m as EventInfo;
+                            return new
+                            {
+                                IsStatic = ei.GetAddMethod() != null ? ei.GetAddMethod().IsStatic : ei.GetRemoveMethod().IsStatic,
+                                Name = ei.Name,
+                                CanSet = false,
+                                CanAdd = ei.GetRemoveMethod() != null,
+                                CanRemove = ei.GetRemoveMethod() != null,
+                                Type = ei.EventHandlerType
+                            };
+                    }
+                }).ToList());
             
             parameters.Set("lazymembers", lazyMemberInfos);
             foreach (var member in type.GetMembers(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.IgnoreCase | BindingFlags.DeclaredOnly)

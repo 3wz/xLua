@@ -1,5 +1,5 @@
 if [ -z "$ANDROID_NDK" ]; then
-    export ANDROID_NDK=~/android-ndk-r15c
+    export ANDROID_NDK=~/android-ndk-r16b
 fi
 
 mkdir -p build_v7a && cd build_v7a

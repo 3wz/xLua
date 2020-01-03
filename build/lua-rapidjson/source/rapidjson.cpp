@@ -439,7 +439,7 @@ private:
 		if (hasJsonType(L, idx, isarray)) // any table with a meta field __jsontype set to 'array' are arrays
 			return isarray;
 
-		return (lua_rawlen(L, idx) >= 0); // any table has length >= 0 are treat as array.
+		return (lua_rawlen(L, idx) > 0); // any table has length > 0 are treat as array.
 	}
 
 	template<typename Writer>
